@@ -22,7 +22,7 @@
 
 ;; Globals
 
-(def app)
+;(def app)
 
 (defstruct color :red :green :blue)
 
@@ -39,11 +39,28 @@
 
 ;; Mandelbrot renderer
 
-(def max-iter 30)
-(def x-min -2.5)
-(def x-max 1)
-(def y-min -1)
-(def y-max 1)
+(def max-iter 300)
+(def mb-range (agent [-2.5 -1 1 1]))
+(defn x-min [r] (nth r 0))
+(defn y-min [r] (nth r 1))
+(defn x-max [r] (nth r 2))
+(defn y-max [r] (nth r 3))
+
+;(defn two-numbers-far-enough-apart [a b]
+;  (Math/abs (- a b)))
+
+;(set-validator! mb-range (fn [new-mbr]
+;                           (let [x-min (x-min new-mbr)
+;                                 x-max (x-max new-mbr)
+;                                 y-min (y-min new-mbr)
+;                                 y-max (y-max new-mbr)]
+;                             (if (and
+;                                   ; x's valid
+;                                   (two-numbers-far-enough-apart x-min x-max)
+;                                   ; y's valid
+;                                   (two-numbers-far-enough-apart y-min y-max))
+;                               new-mbr
+;                               false))))
 
 (defn color-part [start end n num-steps]
   (int (+ (* (/ (- end start) num-steps) n) start)))
@@ -59,15 +76,21 @@
   (into [] (concat
              (palette-piece 0 0 255 255 0 0 40)
              (palette-piece 255 0 0 255 255 0 40)
-             (palette-piece 255 255 0 0 0 0 (* 38 40))
+             (palette-piece 255 255 0 255 0 0 40)
+             (palette-piece 255 0 0 0 0 255 40)
              )))
 
 (defn iter-to-color [iter]
   (if (>= iter max-iter) (struct color 0 0 0)
-    (nth palette iter (struct color 0 0 0))))
+    (nth palette (mod iter (count palette)) (struct color 0 255 0))))
 
 (defn mandelbrot-recur [r0 i0 r i iter]
-  (let [r2 (* r r)
+  (let [r0 (double r0)
+        i0 (double i0)
+        r (double r)
+        i (double i)
+        iter (int iter)
+        r2 (* r r)
         i2 (* i i)]
     ;x*x + y*y < 2*2  AND  iteration < max_iteration
     (if (or (>= iter max-iter) (>= (+ r2 i2) 4))
@@ -76,64 +99,67 @@
       ;y = 2*x*y + y0
       ;x = xtemp
       ;iteration = iteration + 1
-      (do ;(if (> iter 1) (log/info "recusing with iter" iter))
-        (recur r0 i0 (+ (- r2 i2) r0) (+ (* 2 r i) i0) (+ iter 1))))))
+      (recur r0 i0 (+ (- r2 i2) r0) (+ (* 2 r i) i0) (+ iter 1)))))
 
-(defn mandelbrot-point [x y]
-  (let [r0 (+ (* (/ x start-width) (- x-max x-min)) x-min)
-        i0 (+ (* (/ y start-height) (- y-max y-min)) y-min)
+(defn window-to-mb-x [x my-mb-range]
+  (let [x-min (x-min my-mb-range)
+        x-max (x-max my-mb-range)]
+    (+ (* (/ x start-width) (- x-max x-min)) x-min)))
+
+(defn window-to-mb-y [y my-mb-range]
+  (let [y-min (y-min my-mb-range)
+        y-max (y-max my-mb-range)]
+    (+ (* (/ y start-height) (- y-max y-min)) y-min)))
+
+(defn mandelbrot-point [x y my-mb-range]
+  (let [r0 (window-to-mb-x x my-mb-range)
+        i0 (window-to-mb-y y my-mb-range)
         iter (mandelbrot-recur r0 i0 0 0 0)
         color (iter-to-color iter)]
     ;(if (> color-index 250) (log/info "color:" color-index "iter:" iter "r0, i0:" r0 i0 "x, y:" x y "color:" color))
     color))
 
 (defn mandelbrot-renderer [chu,chunk-col,chunk-row]
-  (let [x-corner (* chunk-col chunk-width)
+  (let [my-mb-range @mb-range
+        x-corner (* chunk-col chunk-width)
         y-corner (* chunk-row chunk-height)
-        new-chunk (apply vector (map (fn [x] (apply vector (map (fn [y] (mandelbrot-point (+ x-corner x) (+ y-corner y))) (range chunk-height)))) (range chunk-width)))]
+        new-chunk (apply vector (map (fn [x] (apply vector (map (fn [y] (mandelbrot-point (+ x-corner x)
+                                                                                          (+ y-corner y)
+                                                                                          my-mb-range))
+                                                                (range chunk-height)))) (range chunk-width)))]
     ;(log/info new-chunk)
     new-chunk))
 
+(defn scale-mb-range [mbr scale wx wy]
+  (let [x (window-to-mb-x wx mbr)
+        y (window-to-mb-y wy mbr)
+        x-min (x-min mbr)
+        y-min (y-min mbr)
+        x-max (x-max mbr)
+        y-max (y-max mbr)]
+    (let [new-mbr [(- x (/ (- x x-min) scale))
+                   (- y (/ (- y y-min) scale))
+                   (- x (/ (- x x-max) scale))
+                   (- y (/ (- y y-max) scale))]]
+      (log/info "new-mbr =" new-mbr)
+      (log/info "x-max - x-min =" (- (nth new-mbr 2) (nth new-mbr 0)))
+      new-mbr)))
+
+(defn scroll-mb-range [mbr delta-wx delta-wy]
+  (let [delta-x (* (/ delta-wx start-width) (- (x-max mbr) (x-min mbr)))
+        delta-y (* (/ delta-wy start-height) (- (y-max mbr) (y-min mbr)))]
+    [(- (x-min mbr) delta-x)
+     (- (y-min mbr) delta-y)
+     (- (x-max mbr) delta-x)
+     (- (y-max mbr) delta-y)]))
+
 ;; UI
 (import 
- '(java.awt Dimension Color)
- '(java.awt.image BufferedImage)
  '(javax.swing JPanel JFrame))
 
-(defn rgb-color [color]
-  (+ (* (* 256 256) (get color :red)) (* 256 (get color :green)) (get color :blue)))
-
-(defn render-chunk [gfx chu x-start y-start]
-  (let [img (new BufferedImage chunk-width chunk-height (. BufferedImage TYPE_INT_RGB))]
-    (dorun (for [x (range chunk-width) y (range chunk-height)]
-             (let [color (-> chu (nth x) (nth y))
-                   rgb (rgb-color color)]
-               (.setRGB img x y rgb))))
-    (. gfx (drawImage img x-start y-start nil))))
-
-(defn snapshot-and-paint [gfx dim]
-  (let [cols (/ (.getWidth dim) chunk-width)
-        rows (/ (.getHeight dim) chunk-height)
-        snapshot (dosync (apply vector (for [col (range cols) row (range rows)] @(-> world (nth col) (nth row)))))]
-    (dorun (for [col (range cols) row (range rows)]
-             (render-chunk gfx
-                           (nth snapshot (+ (* col rows) row))
-                           (* col chunk-width) (* row chunk-height))))))
-
-(defn gen-panel [] (doto (proxy [JPanel] [] 
-                           (paint [gfx] (snapshot-and-paint gfx (.getSize this nil))))
-                     (.setPreferredSize
-                       (new Dimension start-width start-height))))
-
-(defn gen-frame [] (doto (new JFrame)
-             (.add (gen-panel))
-             .pack
-             ;.show
-                     ))
-
-(defn repaint [k r old-state new-state]
-  ;(log/info "repainting")
-  (.repaint (get app :frame)))
+;(defn repaint [k r old-state new-state]
+;  ;(log/info "repainting")
+;  (.repaint (get app :frame)))
 
 ;; JavaFX UI
 
@@ -142,8 +168,8 @@
         '(javafx.scene.control ButtonBuilder)
         '(javafx.scene.layout VBoxBuilder)
         '(javafx.scene.image WritableImage PixelWriter)
-        '(javafx.stage StageBuilder)
-        '(java.nio ByteBuffer))
+        '(javafx.scene.transform Scale Translate)
+        '(javafx.stage StageBuilder))
 
 ; instead of extending javafx.application.Application
 (defonce force-toolkit-init (javafx.embed.swing.JFXPanel.))
@@ -180,27 +206,75 @@
 ; ideal
 (def stage (atom nil))
 
+
+; Zooming and Scrolling behaviors and handlers
+
+(defn zoom-factor-adjustor [raw-zf]
+  ; Due to a bug in JavaFX the zoom factor can sometimes be
+  ; negative, protect against this.
+  (let [zf (if (<= raw-zf 0.05) 0.05 raw-zf)]
+    ; make the zoom in factor squared so that it is closer to the zoom out
+    (if (< zf 1)
+      zf
+      (* zf zf))))
+
+(defmacro on-zoom-handler []
+  '(event-handler [event]
+                  (let [zf (zoom-factor-adjustor (.getTotalZoomFactor event))
+                        transforms (.getTransforms canvas)]
+                    (.clear transforms)
+                    (.add transforms (new Scale zf zf (.getX event) (.getY event)))
+                    )))
+
+(defmacro on-zoom-finished-handler []
+  '(event-handler [event]
+                  (let [zf (zoom-factor-adjustor (.getTotalZoomFactor event))
+                        scene (.getScene canvas)
+                        snapshot-img (.snapshot scene
+                                                (new WritableImage
+                                                     (.getWidth scene)
+                                                     (.getHeight scene)))
+                        transforms (.getTransforms canvas)]
+                    (.clear transforms)
+                    (let [gc (.getGraphicsContext2D canvas)]
+                      (.drawImage gc snapshot-img 0 0))
+                    (send mb-range scale-mb-range 
+                          zf
+                          (.getX event)
+                          (.getY event)))))
+
+(defmacro on-scroll-handler []
+  '(event-handler [event]
+                  (let [transforms (.getTransforms canvas)]
+                    (.clear transforms)
+                    (.add transforms (new Translate
+                                          (.getTotalDeltaX event)
+                                          (.getTotalDeltaY event))))))
+
+(defmacro on-scroll-finished-handler []
+  '(event-handler [event]
+                  (let [transforms (.getTransforms canvas)
+                        scene (.getScene canvas)
+                        snapshot-img (.snapshot scene
+                                                (new WritableImage
+                                                     (.getWidth scene)
+                                                     (.getHeight scene)))]
+                    (.clear transforms)
+                    (let [gc (.getGraphicsContext2D canvas)]
+                      (.drawImage gc snapshot-img 0 0))
+                    (send mb-range scroll-mb-range
+                          (.getTotalDeltaX event)
+                          (.getTotalDeltaY event)))))
+
 (def canvas (.. CanvasBuilder create
                 (width start-width) (height start-height)
-                (onZoom (event-handler [event]
-                                       (println "zooming!" (.getTotalZoomFactor event))
-                                       ))
+                (onZoom (on-zoom-handler))
+                (onZoomFinished (on-zoom-finished-handler))
+                (onScroll (on-scroll-handler))
+                (onScrollFinished (on-scroll-finished-handler))
                 build))
 
-; Because Java doesn't have unsigned bytes and we want to combine our argb bytes
-; to a signed 32-bit integer
-(defn ubyte [val]
-   (if (>= val 128)
-     (byte (- val 256))
-     (byte val)))
-
-(defn rgb-color-fx- [color]
-  (.. ByteBuffer (wrap (byte-array [
-                                    (ubyte 0xFF) 
-                                    (ubyte (get color :red))
-                                    (ubyte (get color :green))
-                                    (ubyte (get color :blue))]))
-      (getInt)))
+;; UI draw functions
 
 (defn rgb-color-fx [color]
   (int (-
@@ -236,7 +310,7 @@
 
 ; build a scene
 (run-now (reset! stage (.. StageBuilder create
-                                  (title "Hello JavaFX")
+                                  (title "Fracjure")
                                   (scene (.. SceneBuilder create
                                              ;(height 480) (width 640)
                                              (root (.. VBoxBuilder create
@@ -252,11 +326,11 @@
 
 ;; Main
 
-(defn start []
-  (hash-map :frame (gen-frame)))
-
-(defn stop [app]
-  (.dispose (get app :frame)))
+;(defn start []
+;  (hash-map :frame (gen-frame)))
+;
+;(defn stop [app]
+;  (.dispose (get app :frame)))
 
 (defn -main
   "I don't do a whole lot ... yet."
@@ -265,10 +339,10 @@
 
 ;; Dynamic restart
 
-(if (get app :frame)
-  (stop app))
-
-(def app (start))
+;(if (get app :frame)
+;  (stop app))
+;
+;(def app (start))
 
 (defn start-renderers-in-col [chunks col]
   (dorun (map #(add-watch (nth chunks %) nil
@@ -278,5 +352,10 @@
 
 (defn start-renderers []
   (dorun (map #(start-renderers-in-col (nth world %) %) (range (num-horizontal-chunks)))))
+
+(defn start-renderers-watcher [k r old-state new-state]
+  (start-renderers))
+
+(add-watch mb-range nil start-renderers-watcher)
 
 (start-renderers)
