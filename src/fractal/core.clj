@@ -1,3 +1,33 @@
+;===============================================================================
+;
+;  Fracjure
+;
+;  Consider reworking the state so that data calculated by the renderer function
+;  is just one big rectangle.  Then when user gestures occur, divide up the
+;  rectangle (possibly with pmap).  This has the advantage that when a pan
+;  occurs, just the newly exposed area can be divided and calculated.
+;
+;  pmap is lazy, so use it inside doall to immediately start calculations and
+;  requires shutting down agents (becuase it uses Clojure futures, like Java
+;  futures?)
+;
+;  Also, consider having a renderer on a timer that grabs every 30th of a
+;  second, the state and updates the view with appropriate colors.  The
+;  mandelbrot calculator can then perform all iterations in parallel instead of
+;  calculating out a single pixel to it's extreme.  This would yield an image
+;  faster.
+;
+;  Refactor
+;   - defstruct to deftype (or maybe defrecord).
+;   - use atom for mb-range instead of agent
+;   - create single object that holds system state and passes it to every
+;     function.  Since it is read-only this won't be a problem.
+;   - consider mapv to replace apply-vector-map
+;   - take another stab at formatting
+;   - consider cursive for intellij idea.
+;
+;===============================================================================
+
 (ns fractal.core
   (:gen-class)
   (:require [clojure.tools.logging :as log])
