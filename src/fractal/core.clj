@@ -31,7 +31,9 @@
 (ns fractal.core
   (:gen-class)
   (:require [clojure.tools.logging :as log])
-  (:require [taoensso.timbre :as timbre]))
+  (:require [taoensso.timbre :as timbre])
+  (:import (javafx.stage Stage)
+           (javafx.scene Scene Group)))
 
 (timbre/refer-timbre)
 
@@ -56,10 +58,10 @@
 
 (defstruct color :red :green :blue)
 
-(def world (apply vector 
-                  (map (fn [_] 
-                         (apply vector (map (fn [_] (agent (apply vector (map (fn [_] (apply vector (map (fn [_] (struct color 0 0 0)) (range chunk-height)))) (range chunk-width))))) 
-                                            (range (num-vertical-chunks))))) 
+(def world (apply vector
+                  (map (fn [_]
+                         (apply vector (map (fn [_] (agent (apply vector (map (fn [_] (apply vector (map (fn [_] (struct color 0 0 0)) (range chunk-height)))) (range chunk-width)))))
+                                            (range (num-vertical-chunks)))))
                        (range (num-horizontal-chunks)))))
 
 ;; Blue renderer - renders chunk as solid blue
@@ -184,7 +186,7 @@
      (- (y-max mbr) delta-y)]))
 
 ;; UI
-(import 
+(import
  '(javax.swing JPanel JFrame))
 
 ;(defn repaint [k r old-state new-state]
@@ -193,13 +195,9 @@
 
 ;; JavaFX UI
 
-(import '(javafx.scene SceneBuilder)
-        '(javafx.scene.canvas CanvasBuilder Canvas GraphicsContext)
-        '(javafx.scene.control ButtonBuilder)
-        '(javafx.scene.layout VBoxBuilder)
+(import '(javafx.scene.canvas Canvas)
         '(javafx.scene.image WritableImage PixelWriter)
-        '(javafx.scene.transform Scale Translate)
-        '(javafx.stage StageBuilder))
+        '(javafx.scene.transform Scale Translate))
 
 ; instead of extending javafx.application.Application
 (defonce force-toolkit-init (javafx.embed.swing.JFXPanel.))
@@ -208,27 +206,27 @@
 (defn run-later*
   [f]
   (javafx.application.Platform/runLater f))
- 
+
 (defmacro run-later
   [& body]
   `(run-later* (fn [] ~@body)))
- 
+
 (defn run-now*
   [f]
   (let [result (promise)]
     (run-later
      (deliver result (try (f) (catch Throwable e e))))
     @result))
- 
+
 (defmacro run-now
   [& body]
   `(run-now* (fn [] ~@body)))
- 
+
 (defn event-handler*
   [f]
   (reify javafx.event.EventHandler
     (handle [this e] (f e))))
- 
+
 (defmacro event-handler [arg & body]
   `(event-handler* (fn ~arg ~@body)))
 
@@ -268,7 +266,7 @@
                     (.clear transforms)
                     (let [gc (.getGraphicsContext2D canvas)]
                       (.drawImage gc snapshot-img 0 0))
-                    (send mb-range scale-mb-range 
+                    (send mb-range scale-mb-range
                           zf
                           (.getX event)
                           (.getY event)))))
@@ -296,13 +294,12 @@
                           (.getTotalDeltaX event)
                           (.getTotalDeltaY event)))))
 
-(def canvas (.. CanvasBuilder create
-                (width start-width) (height start-height)
-                (onZoom (on-zoom-handler))
-                (onZoomFinished (on-zoom-finished-handler))
-                (onScroll (on-scroll-handler))
-                (onScrollFinished (on-scroll-finished-handler))
-                build))
+(def canvas (let [c (Canvas. start-width start-height)]
+              (.setOnZoom c (on-zoom-handler))
+              (.setOnZoomFinished c (on-zoom-finished-handler))
+              (.setOnScroll c (on-scroll-handler))
+              (.setOnScrollFinished c (on-scroll-finished-handler))
+              c))
 
 ;; UI draw functions
 
@@ -339,17 +336,16 @@
   (run-now (render-chunk-fx (.getGraphicsContext2D canvas) new-state x-start y-start)))
 
 ; build a scene
-(run-now (reset! stage (.. StageBuilder create
-                                  (title "Fracjure")
-                                  (scene (.. SceneBuilder create
-                                             ;(height 480) (width 640)
-                                             (root (.. VBoxBuilder create
-                                                       ;(minHeight 480) (minWidth 640)
-                                                       (children [canvas])
-                                                       build))
-                                             build))
-                                  build)))
- 
+(run-now (reset! stage
+                 (let [s (Stage.)
+                       group (Group.)
+                       scene (Scene. group)]
+                   (.setTitle s "Fracjure")
+                   (.setScene s scene)
+                   (-> (.getChildren group)
+                       (.add canvas))
+                   s)))
+
 (run-now (.show @stage))
 
 (repaint-fx)
